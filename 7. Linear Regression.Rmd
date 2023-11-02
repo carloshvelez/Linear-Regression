@@ -1,0 +1,1062 @@
+---
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r}
+library(HistData)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+```
+
+# Regresión lineal.
+
+En este curso veremos: 1.
+Cómo desarrolló Galton la regresión lineal.
+2.
+Calcular e interpretar la correlación en una muestra.
+3.
+Estratificar un dataset cuando es apropiado.
+4.
+Entender qué es una distribución normal bivariada.
+5.
+Explicar qué significa el término varianza explicada.
+6.
+Interpretar las dos líneas de regresión.
+
+## Ejemplo motivador: Moneyball.
+
+Como motivación, iremos al 2002 e intentaremos crear un equipo de baseball con un presupuesto limitado.
+En 2002 la nómina de los Yankys triplicaba a la de Oaklan (130 millones vs 40).
+Estadística se ha usado en el deporte desde hace mucho tiempo.
+El conjunto de datos que usaremos (que viene de la librería Lahman), data del siglo 19.
+
+### Algunas estadísticas que se han usado en el baseball.
+
+-   Éxitos del bateador.
+-   Home runs.
+-   Carreras impulsadas (run batted in)
+-   Bases robadas.
+-   Promedio de bateo.
+
+Aunque estas estadísticas se usaron por mucho tiempo, el análisis de datos no.
+Estos cálculos estuvieron allí, sin que se tuviera certeza sobre si permitían establecer que un equipo ganaría.
+
+Esto cambió con Bill James, quien empezó a publicar análisis más profundos de los datos relacionados con el baseball.
+
+Llamó al enfoque de predecir resultados a partir de los datos: Sabermetrics.
+
+Hoy en día este enfoque es usado por prácticamente todo el mundo en baseball.
+
+Para este ejemplo, nos concentraremos en predecir las carreras marcadas, aunque hayan otras estadísticas.
+
+Usaremos en análisis de regresió para desarrollar estrategias que nos permitan construir un equipo de baseball competitivo.
+
+## Reglas básicas del baseball.
+
+-   Meta del baseball: Lograr más carreras (puntos que el otro equipo)
+-   Cada equipo tiene nueve bateadores, que tienen una oportunidad de golpear la bola con un bate, en un orden predeterminado.
+-   Cada que un bateador tiene una oportunidad de batear, se le llama apariencia de placa (PA).
+-   El PA finaliza con un resultado binario: El bateador hace un out (falla) y regresa al banco, o el bateador tiene éxito, y puede correr alrededor de las bases.
+-   Cuando el corredor cubre las cuatro bases, marca una carrera.
+-   Hay cuatro formas en las que el bateador puede triunfar:
+    -   Sencillo: El bateador golpeó la boa y puede ir a primera base.
+    -   Doble: Golpeó la bola y puede ir a segunda base.
+    -   Triple: puede ir a tercera base.
+    -   Home Run: Puede ir a todas las bases y marcar una carrerar.
+    -   Base por bolas: El lanzador tira la pelota afuera de la zona de bateo en cuatro ocasiones, durante un turno al bate.
+
+Históricamente, el promedio de bateo se ha considerado la estadística ofensiva más importante.
+Para definir este promedio, definimos un hit (H) y un al bate (AB).
+Los hits son sencillos, dobles, triples y homeruns.
+Las bases por bolas son son hits.
+Los AB son el número de veces que se obtiene un hit o se hace un out, excluyendo los bb.
+El promedio de bateo es simplemente hits/al bate (h/AB) y es considerada la medida más importante de éxito.
+Hoy en día este promedio está entre 28 y 38 %.
+
+### ¿Bases por bolas o Bases robadas?
+
+Miremos si los equipos que hacen más homeruns, hacen más bases.
+Para eso miremos la relación entre Homeruns y el número de carreras.
+
+```{r}
+library (Lahman)
+library(dslabs)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+ds_theme_set()
+Teams %>% filter(yearID %in% 1961:2001) %>%
+  mutate(HR_por_juego = HR/G, 
+         R_por_juego = R/G) %>%
+  ggplot(aes(HR_por_juego, R_por_juego))+
+  geom_point(alpha = 0.5)
+```
+
+Es evidente que hay relación entre ambas variables.
+
+Ahora miremos la relación entre carreras por juego y bases robadas por juego:
+
+```{r}
+Teams %>%
+  filter(yearID %in% 1961:2001) %>%
+  mutate (BR_por_juego = SB/G,
+          R_por_juego = R/G)%>%
+  ggplot (aes(BR_por_juego, R_por_juego))+
+  geom_point(alpha = 0.5)
+```
+
+Aquí la relación no es tan clara.
+
+```{r}
+Teams %>% filter (yearID %in% 1961:2001) %>%
+  mutate (BB_por_juego = BB/G,
+          R_por_juego = R/G) %>%
+  ggplot(aes(BB_por_juego, R_por_juego))+
+  geom_point(alpha=0.5)
+```
+
+En esta caso sí se aprecia mayor asociación.
+
+Los homeruns pueden ocasionar, tanto las carreras como las bases por bolas.
+En este sentido, se habla de cofounding, cuando una variable afecta tanto a la una como a la otra.
+
+La regresión nos permitirá predecir cosas como: cuantas carreras hará el equipo si incrementamos en número de bases en bolas, pero mantenemos fijos los homeruns.
+
+```{r}
+Teams %>% filter (yearID %in% 1961:2001)%>%
+  mutate(carreras_por_juego = R/G, 
+         bats_por_juego = AB/G)%>%
+  ggplot(aes(carreras_por_juego, bats_por_juego))+
+  geom_point(alpha=0.5)
+```
+
+```{r}
+Teams %>%
+  filter(yearID %in% 1961:2001)%>%
+  mutate (triunfos_por_juego = W/G,
+          Errores_por_juego = E/G)%>%
+  ggplot(aes(triunfos_por_juego, Errores_por_juego))+
+  geom_point(alpha = 0.5)
+```
+
+```{r}
+Teams %>% filter (yearID %in% 1961:2001)%>%
+  mutate (tres_por_juego = X3B/G,
+          dos_por_juego = X2B/G)%>%
+  ggplot(aes(tres_por_juego, dos_por_juego))+
+  geom_point(alpha=0.5)
+```
+
+## Correlación y regresión
+
+Hasta ahora hemos hecho muchos cálculos univariados.
+Sin embargo, la mayoría de proyectos son multivariados.
+
+Por ejemplo, en el baseball podríamos estar interesados en la relación entre bolas en la base y carreras.
+
+Podemos comprender la correlación desde el trabajo de Galton.
+
+Francis Galton estudió la variación y la herencia de rasgos humanos.
+Entre muchos rasgos, Galtón recolectó y estudió datos de alturas de las familias, con el fin de entender la herencia.
+Mientras lo hacía, desarrollo los conceptos de correlación y regresión; y una conección entre pares de variables que siguen una distribución normal.
+
+En el momento en el que fue recogida esta información, lo que se sabe actualmente sobre genética aún no había sido comprendido.
+
+Una de las preguntas que Galton intentó responder fue:
+
+**¿Qué tanto de la altura de un hijo puede predecirse con la de un padre?**
+
+Tenemos acceso a los datos de Galton a través del paquete HistData (datos históricos).
+install.packages("HistData").
+
+```{r}
+
+data("GaltonFamilies")
+alturas_galton <- GaltonFamilies %>% 
+  filter (childNum == 1 & gender == "male") %>%
+  select (father, childHeight) %>%
+  rename (son = childHeight)
+alturas_galton
+```
+
+En tanto que ambas distribuciones se aproximación a una distribución normal, podemos usar, para resumir, dos promedios y dos desviaciones estándar:
+
+```{r}
+alturas_galton %>% summarize (across(.fns = c(Media = mean, De = sd), .names = "{.fn}_{.col}"))%>%round(2)
+```
+
+Sin embargo, con esta información no podemos identificar una característica importante de estos datos:
+
+```{r}
+alturas_galton %>% ggplot(aes(father, son))+
+  geom_point(alpha= 0.5)
+```
+
+Hay una tendencia según la cual, entre más alto el padre, más alto el hijo.
+
+El coeficiente de correlación sí nos permite resumir esta información.
+
+### El coeficiente de correlación.
+
+el coeficiente de correlación se usa para una lista de pares:
+
+$$
+(x_1, y_1),...,(x_n, y_n)
+$$
+
+Con la siguiente fórmula:
+
+$$
+\rho = \frac{1}{n}\sum_{i=1}^{n}(\frac{x_i-\mu_x}{\sigma_x})(\frac{y_i-\mu_y}{\sigma_y})
+$$
+
+Mu es la media de cada variable.
+
+Sigma es la desviación estándar de cada variable.
+
+Rho es la letra de regresión.
+
+La fórmula es sencilla, toma cada observación de la variable a y se la resto a la media de esa variable.
+Luego la divido por la desviación estándar de esa variable.
+Lo mismo hago con la variable b.
+Multiplico.
+Hago esto para cada observación y lo sumo.
+Luego lo divido entre n.
+
+Esta fórmula resume cómo dos variables se mueven juntas.
+Nótese que lo que hay entre paréntesis simplemente significa cuántas desviaciones estándar se mueve la observación desde la media (simplemente escala la variable).
+
+Si ambas variables no se asociaran, entonces el producto de las dos sería cercano a 0, pues una cancelaría a la otra.
+Si la relación fuera positivo, sería cercano a 1, y si fuera negativa, sería cercana a -1.
+
+Si las cantidades varían juntas, entonces tendremos el promedio mayormente positivo, y tendremos una correlación positiva.
+
+Miremos:
+
+```{r}
+media_x <- mean(alturas_galton$father)
+media_y <- mean(alturas_galton$son)
+de_x <- sd(alturas_galton$father)
+de_y <- sd(alturas_galton$son)
+
+alturas_galton$mx <- mean(alturas_galton$father)
+alturas_galton$sdx <- sd(alturas_galton$father)
+alturas_galton$dif_x <- (alturas_galton$father-media_x)/de_x
+alturas_galton$dif_y <- (alturas_galton$son-media_y)/de_y
+alturas_galton$difxxy <- alturas_galton$dif_x*alturas_galton$dif_y
+
+sumatoria <- sum(alturas_galton$difxxy)
+correlación <- cor(alturas_galton$father, alturas_galton$son)
+correlación
+sumatoria
+sumatoria/nrow(alturas_galton)
+plot(alturas_galton$father, alturas_galton$son)
+```
+
+### El coeficiente de regresión de una muestra es una variable aleatoria con distribución normal.
+
+Debido a esto, El coeficiente de una muestra representa el coeficiente de la población, y el error estándar del coeficiente de correlación puede calcularse, a fin de identificar intervalos de confianza.
+
+### El cuarteto de Ascombe
+
+La correlación no siempre es un buen resumen de la relación entre dos variables.
+
+El cuartoto de Ascombe es un conjunto de cuatro conjuntos de datos artificiales, con la misma correlación que luce diferente cuando se grafica.
+
+![](images/Captura%20de%20pantalla%202022-08-05%20114641.png){width="600"}
+
+La correlación sólo tiene sentido en un contexto particular.
+
+Para comprenderlo, trataremos de predecir la altura de los hijos usando la altura de los padres.
+
+### Estratificación
+
+Supongamos que nos piden que adivinemos la altura de un hijo seleccionado al azar.
+Debido a que la distribución de las alturas de los hijos es aproximadamente normal, y a que sabemos que la altura promedio es de 69 pulgadas, entonces 69 es el valor con la mayor proporción y podría ser la predicción con las mejores probabilidades de reducir el error.
+
+Pero... ¿Qué ocurriría si nos dicen que el padre tiene 72 pulgadas de altura?
+Siendo un padre alto, ¿Aun nos mantendríamos en el supuesto de que 69 es el mejor supuesto para ese hijo sabiendo que el padre es más alto que el promedio (1.1 de por encima de la media de altura de padres)?
+
+¿O deberíamos predecir que ese hijo también es 1.1 desviaciones estándar por encima de la media para los hijos?
+Lo cierto es que esto sería una sobreestimación.
+
+Para verlo, miremos a los hijos de los padres cuya altura sea aproximada a 72 pulgadas (Vamos a hacer un promedio condicional, en el que la condición es que el padre mida 72 pulgadas aprox):
+
+```{r}
+media_condicional <- alturas_galton %>%
+  filter (round(father)==72)%>% ##Usamos el round para obtener a los que están más cerca de la pulgada 72. 
+  summarise(media = mean(son))%>% .$media
+media_condicional
+  
+```
+
+Esta media de los hijos de padres con altura aproximada de 72, equivale a 0.54 desviaciones estándar por encima de la media de hijos.
+
+Vamos a hacer boxplot estratificados:
+
+```{r}
+alturas_galton %>% mutate (alturas_estratificadas = factor(round(father)))%>%
+  ggplot(aes(alturas_estratificadas, son))+ 
+  geom_boxplot()+
+  geom_point()
+```
+
+Se puede ver que los centros de cada grupo tienden a incrementar con la altura de los padres; parece una relación lineal.
+
+Podríamos graficar esa relación de la siguiente manera:
+
+```{r}
+alturas_galton %>% 
+  mutate (father = round(father))%>%
+  group_by(father)%>%
+  summarise(altura_media_condicional_hijos = mean(son))%>%
+  ggplot(aes(father, altura_media_condicional_hijos))+
+  geom_point()
+```
+
+Si dibujáramos una línea, nos daríamos cuenta que esta tiene una altura aproximada de 0.5, lo cual es lo mismo que el coeficiente de correlación.
+
+Esto no es gratuito, vamos a dibujar un diagrama de dispersión con las variables escaladas y una línea cuya altura será la correlación:
+
+```{r}
+correl <- cor(alturas_galton$father, alturas_galton$son)
+alturas_galton %>% 
+  mutate (father = round(father))%>%
+  group_by(father)%>%
+  summarise(son = mean(son))%>%
+  mutate (z_father = scale(father), 
+          z_son = scale(son))%>%
+  ggplot(aes(z_father, z_son))+
+  geom_point()+
+  geom_abline(intercept = 0, slope = correl)
+```
+
+Esa línea (una cuya altura es la equivalente a la correlación), es lo que se llama ***Línea de regresión.***
+
+Galton propuso justificaciones teóricas para usar esta línea como predictor.
+
+Esta línea nos está diciendo que, por cada desviación estándar que aumente x, y crecerá $\rho$ desviaciones estándar.
+
+**En otras palabras, la correlación informa cuántas desviaciones estándar por encima de la media aumentaría y, si x se moviera una desviación estándar.**
+
+Por lo tanto, la fórmula para la línea de regresión es la siguiente:
+
+$$
+(\frac{y_i-\mu_x}{\sigma_x}) = \rho(\frac{x_i - \mu_x}{\sigma_x})
+$$
+
+Nótese que la fórmula de arriba lo único que hace es multiplicar por el coeficiente de correlación cada una de las x escaladas.
+Con eso se obtiene la línea.
+
+Esto implica que siempre hay una regresión hacia la media de x: Lo máximo que podemos encontrar una una $\rho$ perfecta.
+Cuando multiplicamos la x escalada por la correlación perfecta, tendremos exactamente la misma x.
+Pero como en casi todos los casos tenemos correlacione por debajo de 1, siempre encontraremos una regresión.
+
+En este caso, la predicción que se desprende del trabajo de Galton es que la altura de los hijos tienden a regresar al promedio de la altura de los padres (por esto se llama regresión).
+
+Si escribiéramos esto en una fórmula estándar:
+
+$$
+y = b +mx
+$$
+
+$b=$ Intercepto.
+
+$m=$ altura.
+
+la altura sería igual a rho multiplicado por la división entre la desviación cuadrada de y y la de x:
+
+$$
+m = \rho\frac{\sigma_y}{\sigma_x}
+$$
+
+y el intercepto b sería igual a la media de y menos la altura por la media de x:
+
+$$
+b = \mu_y - m\mu_x
+$$
+
+Si aplicamos esta fórmula a un par de variable escaladas, entonces tendríamos que el intercepto es 0 (debido a que media de y y media de x son 0), y la altura es el coeficiente de correlación rho (debido a que cada desviación estándar es 1, lo cual deja intacto el rho).
+
+Mírémoslo en código:
+
+```{r}
+mu_x <- mean(alturas_galton$father)
+mu_y <- mean(alturas_galton$son)
+s_x <- sd(alturas_galton$father)
+s_y <- sd(alturas_galton$son)
+r <- cor(alturas_galton$father, alturas_galton$son)
+m <- r*s_x/s_y
+b <- mu_y - (m*mu_x)
+```
+
+Con estas fórmulas podemos hacer un plot:
+
+```{r}
+alturas_galton %>% 
+  ggplot(aes(father, son))+
+  geom_point(alpha = 0.5)+
+  geom_abline(intercept = b, slope = m)
+```
+
+Si, escalamos las variables, entonces el intercepto será cero, y la altura será la correlación:
+
+```{r}
+alturas_galton %>%
+  ggplot(aes(scale(father), scale(son)))+
+  geom_point(alpha= 0.5)+
+  geom_abline(intercept = 0, slope = r)
+```
+
+La línea de regresión nos da la prediccion.
+
+***Una ventaja de usar la línea de regresión es que estamos usando todos los datos, de ambas variables, para estimar únicamente dos parámetros, que a su vez permiten construir una única función.***
+
+Esto lo hace mucho más estable.
+Si usáramos medias condicionales para cada punto de x, tendríamos errores estándar muy grandes, lo cual lo hace inestable.
+
+Nótese que esta sección pasamos de estratificar los datos y desde allí sacar medias y desviaciones estándar para cada estrato, a descubrir que es posible, desde allí, crear una línea de regresión, que **podría** funcionar como predictora.
+
+### Distribución normal bivariada
+
+La correlación y la línea de regresión son estadísticos ampliamente usados, pero a menudo se les usa o interpreta mal.
+
+La forma principal en la que se debería usar la correlación, involucra la **distribución normal bivariada.**
+
+Cuando un par de variables aleatorias es aproximado por una distribución normal bivariada, estas lucen como óvalos, los cuales pueden ser estrechos (correlaciones altas), o circulares (sin correlación).
+
+![](images/Captura%20de%20pantalla%202022-08-08%20130805.png)
+
+Una forma más técnica de definir una distribución normal bivariada para las variables x y y, es la siguiente:
+
+Si X es una variable aleatoria distribuída normalmente y Y es también una variable aleatoria distribuída normalmente, y para cualquier estrato de X (digamos X=x) Y es aproximadamente normal en ese estrato, entonces el par es aproximadamente bivariado normal.
+
+Cuando fijamos la variable aleatoria a la observada X = x, entonces nos referimos a la distribución resultante de Y en ese estrato, como la distribución condicional de Y, dado X = x.
+
+$f_Y | X= x$ Esta es la distribución condicional de cada Y, dado que X asuma un valor observado.
+
+$E(Y|X = x)$ Este es el valor esperado de Y, dado que X asuma un valor observado.
+
+En el ejemplo de las alturas, si pensamos que la distribución se distribuye de manera normal bivariada, entonces esperaríamos que para cada valor de x (altura de los padres), el valor de y (altura de los hijos) se distribuya normalmente.
+
+```{r}
+alturas_galton %>% 
+  mutate (z_padre = round((father - mean(father))/sd(father)))%>%
+  filter (z_padre %in% -2:2)%>%
+  ggplot()+
+  stat_qq(aes(sample = son))+
+  facet_wrap(~z_padre)
+```
+
+Galton mostró, usando estadísticas matemáticas, que cuando dos variables siguen una distribución normal bivariada, para cualquier valor dado de X, el valor esperado de Y, en los pares para los que X está fijo, está dado por la siguiente fórmula:
+
+$$
+E(Y|X=x) = \mu_Y+\rho\frac{X - \mu_X}{\sigma_X}\sigma_Y
+$$
+
+Lo anterior es una línea con una altura dada por esta fórmula:
+
+$$
+\mu_Y - m\mu_X
+$$
+
+Lo cual es una línea de regresión que se vió más arriba.
+
+$$
+\frac{E(Y|X=x) - \mu_Y}{\sigma_Y} = \rho\frac{x-\mu_X}{\sigma_X}
+$$
+
+Esto implica que, si los datos son aproximadamente bivariados normales, los valores esperados condicionales están dados por la línea de regresión.
+
+### Varianza explicada
+
+La teoría que vemos, también indica que la desviación estándar y la varianza de la distribución condicional que describimos para las variables normales bivariadas, se dan por esta fórmula:
+
+$$
+SD(Y|X = x) = \sigma_y\sqrt{1-\rho^2}
+$$
+
+$$
+Var(Y|X = x) = \sigma^2_y(1-\rho^2)
+$$
+
+De esta fórmula vienen las afirmaciones tales como X explica el 50% de la varianza.
+
+Nótese que la varianza de Y es sigma cuadrado.
+Pero si la condicionamos en X, la varianza se disminuye, pues se multiplica por un número que, excepto cuando no hay correlación, es menor que 1.
+Dicho formalmente, la varianza se disminuye rho cuadrado multiplicado por 100%.
+
+Así pues, la correlación y la cantidad de varianza explicada se relacionan uno con otro, pero es importante recordar que las afirmaciones respecto al porcentaje de varianza explicada, sólo son válidos cuando hablamos de distribuciones normales bivariadas.
+
+### Hay dos líneas de regresión.
+
+Ya hemos visto como calcular el valor esperado de Y dado que X sea x, pero ¿Qué pasa si queremos calcular el valor esperado de X dade que Y sea y?
+
+No se debe pensar en usar la misma línea de regresión, considerando que esa línea predice x con base en y.
+
+Por el contrario, necesitamos calcular $E(X|Y=y)$, lo cual nos da otra línea de regresión.
+
+$$
+m=\rho\frac{\sigma_x}{\sigma_y}
+$$
+
+$$
+b=\mu_x-m\mu_y
+$$
+
+### Ejercicio: aplicar con madres e hijas.
+
+```{r}
+set.seed(1989, sample.kind = "Rounding")
+library(HistData)
+data("GaltonFamilies")
+alturas_femeninas <- GaltonFamilies %>%
+  filter(gender == "female")%>%
+  group_by(family)%>%
+  sample_n(1)%>%
+  ungroup()%>%
+  select(mother, childHeight)%>%
+  rename(madre = mother,
+         hija = childHeight)
+```
+
+1.  Calcular la media y la desviación estándar de las madres e hijas, así como el coeficiente de correlación entre estas:
+
+    ```{r}
+    alturas_femeninas %>% 
+      summarise(media_madres = mean(madre),
+                media_hijas = mean(hija), 
+                sd_madres = sd(madre), 
+                sd_hijas = sd(hija), 
+                correlación = cor(madre, hija))
+    ```
+
+2.  Calcular la altura y el intercepto de la línea de regresión que predice las alturas de las hijas a partir de la de las madres.
+    ¿Dado un incremento de la altura de las madres en una pulgada, cuandas pulgadas se espera que cambie la altura de las hijas:
+
+    ```{r}
+    "La altura de la recta es:"
+    rho <- cor(alturas_femeninas$madre, alturas_femeninas$hija)
+    sigma_x <- sd(alturas_femeninas$madre)
+    sigma_y <- sd(alturas_femeninas$hija)
+    mu_x <- mean(alturas_femeninas$madre)
+    mu_y <- mean(alturas_femeninas$hija)
+    m <- rho*sigma_y/sigma_x
+    m
+    "El intercepto es:"
+    b <- mu_y-(m*mu_x)
+    b
+
+    "El cambio en x dado un cambio de 1 en y es de"
+    rho*sigma_y/sigma_x
+    ```
+
+3.  porcentaje de la variabilidad explicado por la altura de las madres:
+
+<!-- -->
+
+    ```{r}
+    rho**2*100
+
+    ```
+
+Una madre tiene una altura de 60, ¿Cuál es el valor esperado de la altura de la hija?
+
+```{r}
+b+m*60
+```
+
+## Modelos lineales
+
+Logros esperados:
+
+-   Usar regresión multivariada para ajustar factores de confusión.
+
+-   Escribir modelos lineales para describir la relación entre dos o más variables.
+
+-   Calcular los estimados de mínimos cuadrados para un modelo de regresión, usando la función lm().
+
+-   Comprender la diferencia entre tibbles y data frames.
+
+-   Usar las funciones tidy(), glance() y augment() del paquete broom.
+
+-   Aplicar la regresión lineal para medir errores en los modelos.
+
+### Factores de confusión: ¿son más predictivas bases por bolas (BB)?
+
+Anteriormente descubrimos que la pendiente de la línea de regresión para predecir el número de carreras con base en las bolas en la base era de 0.75 aproximadamente.
+
+¿Significa esto que si contratamos a un jugador con muchas bases por bola, que incremente el número de estas por dos, nuestro equipo anotará 1.5 veces más carreras por juego?
+
+Debemos recordar que asociación no es causalidad.
+
+Los datos ofrecen evidencia fuerte de que un equipo con dos o más bb por juego que el promedio, anota 1.5 veces más carreras por juego que el promedio, pero esto no significa que los bb sean la causa de las carreras.
+
+Si computamos la línea de regresión para los sencillos, obtenemos una correlación de 0.5; un valor menor.
+Nótese que un sencillo lleva al jugador a primera base, tal como lo hace un bb.
+Y es sabido por lo fanáticos que con un sencillo, los jugadores en base tienen mejor oportunidad de anotar que con una bb.
+Así que ¿Cómo pueden ser las bb más predictivas que los sencillos?
+
+La razón de que esto ocurra son los factores de confusión.
+
+La correlación entre home runs, bb y sencillos se dan por los siguientes números:
+
+```{r}
+Teams %>% filter(yearID %in% 1961:2001)%>%
+  mutate(Sencillos = (H-HR-X2B-X3B)/G, BB = BB/G, HR = HR/G)%>%
+  summarise(cor(BB, HR), cor (Sencillos, HR), cor(BB, Sencillos))
+```
+
+Vemos que la correlación entre HomeRuns y BB también es alta.
+Vemos que los lanzadores, temerosos de los HomeRuns evitan lanzar strikes a los que suelen hacer homeruns.
+Como resultado, los lanzadores de homeRuns suelen tener más bolas por bases.
+
+En ese sentido, un equipo con muchos bateadores de HomeRuns y mucho HomeRuns también tendrán más bases por bola.
+
+Por lo tanto, puede parecer que las bolas por base causan carreras, cuando en realidad son los HomeRuns los que las causan.
+
+Decimos entonces que las Bases en bolas son factores de confusión con respecto a los HomeRuns.
+
+Pero ¿Podría ocurrir que, incluso en ese escenario, las bases por bola también ayuden?
+
+Para encontrarlo, de alguna manera tendríamos que ajustar el efecto de los HomeRuns.
+La regresión puede ayudar aquí también.
+
+### Estratificación y regresión multivariada.
+
+Para tratar de averiguar si las BB son útiles para crear carreras, tendremos que fijar los HomeRuns en un valor determinado y luego examinar la relación entre carreras y BB.
+
+De la misma manera que estratificamos a los padres redondeándolos a la pulgada más cercana, estratificaremos los hom runs por juego a la décima más cercana.
+
+```{r}
+dat <- Teams %>% filter(yearID %in% 1961:2001) %>%
+  mutate (estrato_HR = round(HR/G, 1),
+          BB_por_juego = BB/G,
+          R_por_juego = R/G)%>%
+  filter(estrato_HR >=0.4 & estrato_HR <=1.2 )
+```
+
+Ahora podemos hacer un diagrama de dispersión para cada estrato, de carreras vs bases por bola.
+
+```{r}
+dat %>%
+  ggplot(aes(BB_por_juego, R_por_juego))+
+  geom_point(alpha = 0.5)+
+  geom_smooth(method = "lm")+
+  facet_wrap(~estrato_HR)
+```
+
+La pendiente de la regresión para predecir las carrerar con base en BB, cuando ignoramos los HomeRuns fue de 0.735, pero una vez que estratificamos los HomeRuns, esta pendiente se redujo sustancialmente.
+Podemos verlos así:
+
+```{r}
+dat %>% group_by(estrato_HR)%>%
+  summarise(pendiente = cor(R_por_juego, BB_por_juego)*sd(R_por_juego)/sd(BB_por_juego))%>%round(3)
+```
+
+Estos valores son más cercanos al obtenidos para los Sencillos (0.449), lo cual es más consistente con la intuición según la cual Los sencillos y los BB nos llevan a primera base (deberían de tener el mismo poder).
+
+Ahora podemor ver cómo es el efecto estratificando las bases por bola:
+
+```{r}
+dat2 <- Teams %>%
+  filter (yearID %in% 1961:2001)%>%
+  mutate(estrato_BB = round(BB/G, 1),
+         HR_por_juego = HR/G, 
+         R_por_juego = R/G)%>%
+  filter(estrato_BB >= 2.8 & estrato_BB <=3.9)
+
+dat2 %>%
+  ggplot(aes(HR_por_juego, R_por_juego))+
+  geom_point(alpha = 0.5)+
+  geom_smooth(method = "lm")+
+  facet_wrap(~estrato_BB)
+```
+
+En este caso, la pendiente es la siguiente:
+
+```{r}
+dat2 %>% group_by(estrato_BB)%>%
+  summarise(pendiente = cor(R_por_juego, HR_por_juego)*sd(R_por_juego)/sd(HR_por_juego))%>%round(2)
+```
+
+No cambian mucho de la estimación original de 1.84.
+
+Para ambos casos acabados de analizar, parece que tenemos una distribución bivariada aproximadamente normal.
+
+Es un poco complejo estar computando líneas de regresión para cada estrato.
+pues estaríamos ajustando el siguiente modelo, para x1 cambiando para diferentes valores de x2 y viceversa.
+
+$$
+E[R|BB=x_1, HR=x_2]=\beta_0+\beta_1(x_2)x_1+\beta_2(x_1)x_2
+$$
+
+¿Hay una aproximación más simple?
+
+Nótese que si tomamos la variabilidad aleatoria en cuenta, las pendiente estimadas por estrato no parecen cambiar mucho.
+
+Si estas pendiente son, de hecho, las mismas, esto implica que esta función $\beta_1(x_2)$ y la otra función $\beta_2(x_1)$, son constantes.
+lo que, a su vez, implica que la expectativa de carreras condicionadas a Home Runas y Bolas en base pueden escribirse con un modelo más simple:
+
+$$
+E[R|BB=x_1, HR = x_2] = \beta_0+\beta_1x_1+\beta_2x_2
+$$
+
+Este modelo implica que, si el número de Home Runos es fijo, observamos una relación lineal entre las carreras y las bolas en base, y que la pendiente de esa relación no depende del número de Home Runs.
+
+Sólo la pendiente cambia cuando los Home Runs se incrementan.
+
+Lo mismo es cierto si intercambiamos los Home Runs y las Bases por bola.
+
+En este análisis, conocido como regresión multivariada, decimos que la pendiente de las bases por bola $\beta_1$ se ajusta al efecto del home Run.
+
+Si esto es cierto, entonces los factores de confusión se han abordado.
+Pero ¿Cómo estimamos beta 1 y beta 2?
+
+Para esto debemos aprender sobre modelos lineales y estimaciones de mínimos cuadrados.
+
+### Modelos lineares.
+
+Desde el desarrollo original de Galton, la regresión se ha convertido en una de las herramientas más ampliamente usadas en la ciencia de datos.
+
+Una de las razones es que la regresión permite encontrar relaciones entre dos variables, mientras se ajustan las otras.
+Esto es muy útil en campos en los que es difícil hacer un control experimental de las otras variables (economía, epidemiología).
+
+Cuando no podemos hacer control experimental, los factores de confusión son prevalentes.\
+
+Por ejemplo.
+Al medir la relación entre problemas de corazón y consumo de comidas rápidas, hay otras variables que pueden estar incidiendo, como el estilo de vida, el nivel socioeconómico, etc.
+La regresión permite controlar el efecto de dichas variables; de lo contrario, se estaría sobreestimando dicho efecto.
+
+Más arriba se dijo que, si los datos son bivariados normales, entonces la expectativa condicional sigue una línea de regresión.
+Esto no es un supuesto extra, sino un resultado derivado del supuesto de que son bivariados normales.
+
+Sin embargo, en la práctica, es común es común que se planteen modelos que describen la relación estre dos o más variables usando lo que se llama un modelo lineal.
+Sabemos que lienal aquí no se refiere exclusivamente a lineas, sino al hecho de que la expectativa condicional es una combianción lineal de cantidades conocidas.
+Se trata de una combinación que multiplica estas cantidades por una constante, y luego las suma.
+Por ejemplo: $2+3x-4y+5z$ es una combinación lineal de tres cantidades $(x,y,z)$.
+
+De la misma forma $\beta_0+\beta_1x_1+\beta_2x_2$ es una combinación lineal de $x_1$ y $x_2$ .
+
+El modelo lineal más simple es una constante \$\\beta_0\$, el siguiente modelo más simple es una línea de $\beta_0+\beta_1x$
+
+Para los datos de Galton, podemos denotar n alturas observadas de los padres con $x_1…x_n$ , así, modelamos las n alturas de los hijos que estamos intentando predecir, con el siguiente modelo:
+
+$$
+Y_i = \beta_0+\beta_1x_i+\epsilon_i
+$$
+
+$$
+i = 1...N
+$$
+
+Aquí las $x_i$ son las alturas de los padres, las cuales están fijas, no son variables, debido al condicionamiento (lo hemos condicionado a esos valores).
+y $Y_i$ es la altura aleatoria de los hijos que queremos predecir.
+
+También asumimos que los errores, que están denotados con $\epsilon$ son independientes unos de otros, y que tienen un valor esperado de 0, y la desviación estándar, que normalmente es \$\\sigma\$, no depende de $i$ (es la misma para cada individuo).
+
+Sabemos \$x_i\$, pero para tener un modelo útil para la predicción, necesitamos $\beta_0$ y $\beta_1$, los cuales podemos estimar.
+
+Una vez hacemos esto, podemos predecir la altura de los hijos de cualquier altura de los padres.
+
+Nótese que, si además asumimos que los errores $\epsilon$ están normalmente distribuídos, entonces este modelo es exactamente el mismo que se derivó más arriba para la distribución normal bivariada.
+
+Una diferencia sutil con el cálculo anterior, es que en aquél, asumimos que los datos eran normales bivariados, y el modelo lineal fue derivado, no asumido.
+En la práctica, los modelos lineales sólo son asumidos, sin necesariamente asumir normalidad.
+la distribución de los $\epsilon$ no es especificada.
+
+Sin embargo, si los datos son normales bivariados, el modelo de regresión lineal que se mostró, aplica.
+Si los datos no son bivariados, entonces se necesitan otras formas de justificar el modelo.
+
+#### Interpretabilidad de los modelos lineales.
+
+Una de las razones por las que los modelos lineales son populares, es que son interpretables.
+En el caso de los datos de Galton, podemos interpretar los datos así:
+
+"Debido a los genes heredados, la predicción de la altura de los hijos crece $\beta_1$ veces, por cada pulgada que se incrementa la altura de los padres"
+
+Debido a que no todos los hijos con padres de una altura equis, son iguales en altura, se necesita el término $\epsilon$, que explica la variabilidad restante, la cual es debida a los demás factores ambientales y aleatorios.
+
+Nótese que, tal como queda el modelo.
+$\beta_0$ no es muy interpretable, pues representa la altura de un hijo cuyo padre tiene la altura de 0, lo cual es imposible.
+Para que sea más interpretable, habría que escalar las variables, de tal forma que dicho 0 represente al promedio de las alturas de los padres.
+
+### Estimados de mínimos cuadrados (LSE)
+
+Para que los modelos lineales sean útiles, debemos extimar los parámetros (los \$\\beta\$)
+
+El enfoque estándar en la ciencia es encontrar los valores $\beta$ que minimicen la distancia entre el modelo y los datos.
+
+Para cuantificar esta distancia, usamos la ecuación de mínimos cuadrados.
+Para los datos de Galton, escribiríamos algo así:
+
+$$
+RSS = \sum_{i=1}^n\{Y_i - (\beta_0+\beta_1x_i)\}^2 
+$$
+
+Esta ecuación es llamada la **Suma de Residuos Cuadrados (RSS)**.
+Nótese que lo que se hace es restar el valor observado de los valores predichos (estos son los residuos), luego se elevan al cuadrado, y finalmente se suman.
+
+Una vez hemos encontrado los valores $\beta$ que minimizan la RSS, llamamos a este valor El **estimador de mínimos cuadrados. LSE** y los denotamos con
+
+$$
+\hat{\beta_0}
+$$
+
+Y
+
+$$
+\hat{\beta_1}
+$$
+
+Escribamos la función que nos permite calcular, para cada par de valores de $\beta_0$ y $\beta_1$ en nuestra base de alturas de Galton.
+
+```{r}
+rss <- function(beta0, beta1, data){
+  resid <- alturas_galton$son - ( beta0 + (beta1 * alturas_galton$father))
+  return (sum(resid^2))
+  }
+```
+
+Esta función nos arrojaría datos para un gráfico de tres dimensiones: x para beta 1, y para beta 2 y z para los RSS.
+
+Para encontrar el mínimo, tendríamos que mirar ese plot tridimensional.
+Aquí vamos a hacer una versión bidimensional manteniendo $\beta_0$ fijo en 25.
+De esa manera, será una función de RSS de beta 1.
+
+```{r}
+beta1 = seq(0, 1, len = nrow(alturas_galton))
+resultados <- data.frame(beta1 = beta1,
+                         rss = sapply(beta1, rss, beta0=25))
+resultados %>% ggplot(aes(beta1,rss))+
+  geom_line(col=2)
+
+```
+
+Podemos ver un mínimo claro de alrededor de 0.65.
+Así podemso ver cuál es el mejor estimado.
+Sin embargo, este mínimo es para beta_1, con beta_0 fijado en 25, pero no sabemos si ese es el mínimo de beta_0.
+**No sabemos si 25 y 0.65 minimizan la ecuación a lo largo de todos los pares**.
+Podríamos intentar con ensayo y error, pero esto no va a funcionar.
+En su lugar, se usa el cálculo: se toman los derivados parciales, se establecen en 0, y se resuelve para $\beta_1$ y $beta_0$.
+Si tenemos muchos parámetros, estas ecuaciones pueden hacerse complejas.
+
+**Pero hay ecuaciones en R que hacen ese cálculo por nosotros** Es deseable aprender las matemáticas que hay tras estas ecuaciones, pero no se van a ver.
+
+### La función lm()
+
+En R, podemos obtener los estimadores de mínimos cuadrados usando la función lm.
+
+Para ajustar el siguiente modelo: $$
+Y_i = \beta_0+\beta_1x_i+\epsilon_i
+$$ En el que Y es la altura de los hijos, y x la de los padres, podríamos escribir el siguiente código:
+
+```{r}
+modelo <- lm(son~father, data = alturas_galton)
+modelo
+```
+
+En la función lm(), usamos el caracter \~ para decirle a R que prediga lo que hay a la izquierda, con base en lo que hay a la derecha.
+El intercepto se agrega automáticamente en el modelo, de tal forma que no se tenga que escribir.
+
+El objeto "modelo" que se acaba de escribir tiene más información:
+
+```{r}
+summary(modelo)
+```
+
+Para entender varias cosas de esta información es importante entender que los estimadores de mínimos cuadrados (LSE) son variables aleatorias, y la matemática estadística ofrece algunas ideas de la distribución de estas variables aleatorias.
+
+### Los LSE son variables aleatorias.
+
+Los LSE se derivan de los datos, los cuales son aleatorios.
+Esto implica que nuestros estamadores son variables aleatorias.
+Para verlo, podemos hacer una simulación Monte Carlo, en la que asumimos que las alturas de los hijos y de los padres que tenemos en nuestros datos, definen a una población entera.
+Tomaremos muestras aleatorias de 50 y calcularemos el coeficiente de la pendiente de regresión para cada una:
+
+```{r}
+B <- 1000
+N <- 50
+
+lse <- replicate(B, {
+  sample_n(alturas_galton, N, replace=TRUE)%>%
+    lm(son~father, data = .)%>%
+    .$coef
+})
+
+lse <- data.frame(beta_0 = lse[1,], beta_1 = lse[2,])
+```
+
+En el objeto lse tenemos entonces los cálculos de $beta_0$ y $beta_1$ para mil muestras aleatorias de 50 alturas de padres e hijos.
+Ahora vamos a ver la variabilidad:
+
+```{r}
+p1 <- lse%>%ggplot(aes(beta_0))+
+  geom_histogram(binwidth = 5, color = "black")
+p2 <- lse%>%ggplot(aes(beta_1))+
+  geom_histogram(binwidth = 0.1, color = "black")
+grid.arrange(p1, p2, ncol=2)
+```
+
+La razón por la que lucen normal, es porque el teorema del límete central se aplica aquí: para un tamaño lo suficientemente grande de N, los estimadores de mínimos cuadrados van a ser aproximadamente normales, con valor esperado $\beta_0$ y $\beta_1$ respectivamente.
+El error estándar es un poco más complicado de calcular, pero la teoría matemática permite hacerlo, y están incluidos en el summary de la función lm().
+
+Miremos los errores estándar estimados para una muestra aleatoria:
+
+```{r}
+sample_n(alturas_galton, N, replace=TRUE) %>%
+  lm(son~father, data= .) %>% summary
+```
+
+Están en la segunda columna de los coeficientes.
+
+Podemos ver que esos errores estándar son cercanos a los que obtenemos de la simulacion montecarlo:
+
+```{r}
+lse %>% summarise(se_0 = sd(beta_0), se_1 = sd(beta_1))
+```
+
+El reporte summary también informa estadísticos t y valores p.
+El estadístico t no se basa en el teorema del límite central, pero sí en el supuesto según el cual, los $\epsilon$ siguen una distribución normal.
+Bajo este supuesto, la teoría matemática afirma que los LSE, divididos por su error estándar($\frac{\hat{\beta_0}}{\hat{SE}(\hat{\beta_0})}$ y $\frac{\hat{\beta_0}}{\hat{SE}(\hat{\beta_0})}$), siguen una disbribución t, con $N - p$ grados de libertad, siendo $p$ el número de parámetros en el modelo, que en este caso es 2.
+los dos valores p, prueban la hipótesis nula de que $\beta_0$ es 0 y $\beta_1$ es cero. 
+Nótese que para un tamaño lo suficientemente largo de N, el teorema del límite central funciona y la distribución t se vuelve casi la misma que una distribución normal. 
+Así que si se asume que los errores son normales y se usa una distribución t, o se asume que N es lo suficientemente larga para usar el teorema del límite central, se puede construir un intervalo de confianza para los parámetros. 
+
+La prueba de hipótesis para modelos de regresión es ampliamente usada en epidemiología y economía, para hacer afirmaciones tales como que el efecto de A y B fue estadísticamente significativo, después de ajustar para X, Y y Z. Pero es muy importante notar que varios supuestos (aquí sólo se tuvieron en cuenta algunos) deben cumplirse para sostener estas afirmaciones. 
+
+### Otras consideraciones sobre los LSE
+Aunque la interpretación no es muy directa, también es importante saber que los LSE pueden estar altamente correlacionados. 
+```{r}
+lse %>% summarise(cor(beta_0, beta_1))
+```
+Sin embargo, la correlación depende de cómo se definan y transformen los predictores. 
+
+Aquí vamos a escalar las alturas de los padres: 
+```{r}
+lse2 <- replicate(B, {
+  sample_n(alturas_galton, N, replace = TRUE)%>%
+    mutate(father = father - mean(father)) %>%
+    lm(son~father, data = .) %>% .$coef
+})
+
+
+```
+
+Veamos que pasa con la correlación en esta caso: 
+```{r}
+cor(lse2[1,], lse2[2,])
+```
+
+### Las variables predichas son variables aleatorias: 
+Con nuestro modelo podemos obtener predicciones de y poniendo los estimadores en el modelo de regresión. 
+Las predicciones de y también son una variable aleatoria. Si asumimos normalidad, o tenemos una muestra lo suficientemente grande, el teorema del límite central permite construir intervalos de confianza para las predicciones. 
+De hecho la función ggplot geom_smooth(), cuando se le solicita el método lm geom_smooth(method = "lm"), grafica intervalos de confianza alrededor de la y predicha (línea de regresión).
+miremos un ejemplo: 
+```{r}
+alturas_galton %>% ggplot(aes(son, father))+
+  geom_point()+
+  geom_smooth(method = "lm")
+```
+
+En la línea de regresión (azul) tenemos las predicciones, y la bana que hay alrededor de esta son los intervalos de confianza.
+la función de R, predict(), toma un objeto lm() como input y retorna las predicciones. 
+```{r}
+predict(modelo)
+```
+
+podemos graficar esto así: 
+```{r}
+alturas_galton %>% 
+  mutate(Y_hat = predict(modelo))%>%
+  ggplot(aes(father, Y_hat))+
+  geom_line()
+```
+Vemos que cuando se grafican las X con las y predichas ($\hat{y}), tenemos una línea. 
+
+La función predict, también permite predecir los errores estándar, agregándole se.fit = TRUE:
+```{r}
+predict(modelo, se.fit = TRUE)
+```
+
+### Dplyr avanzado
+Volvamos al ejemplo del baseball. Estimamos las lineas de regresión para predecir carreras por bb en diferentes estratos de homerun. 
+Primero construimos un dataframe y luego, puesto que no conocíamos la función lm, usamos la fórmula directamente: (correlación variables * sd(y)/sd(x)).
+Dijimos que las pendientes eran similares y que las variaciones probablemente se debían a las variaciones aleatorias. 
+Para ofrecer información más rigurosa sobre ese supuesto, el cual llevó a nuestro modelo normal multivariado, podríamos computar los intervalos de confianza para cada pendiente, no hemos aprendido aún la fórmula pero podemos usar la información que nos facilita la función lm. 
+Si usamos la función lm para que nos arroje la pendiente para cada estrato, agrupando los resultado, así: 
+```{r}
+dat <- Teams %>% filter(yearID %in% 1961:2001) %>%
+  mutate(HR = round(HR/G, 1), 
+         BB = BB/G,
+         R = R/G) %>%
+  select(HR, BB, R) %>%
+  filter(HR >= 0.4 & HR<=1.2)
+
+dat %>% 
+  group_by(HR)%>%
+  lm(R~BB, data=.)
+```
+ no obtenemos lo que queremos. Esto se espera porque lm no es parte de tidyverse, y termina haciendo el cálculo para el dataframe completo (ignora el group_by). 
+ 
+ Podríamos evitar esta situación, incluyendo la función lm, dentro de un summarise: 
+ 
+```{r}
+dat %>%
+  group_by(HR) %>%
+  summarise (pendiente = lm(R~BB)$coef[2])
+```
+ 
+ Pero ¿Cómo incluir los intervalos de confianza?
+ 
+ El paquete broom ofrece funcionalidad para conectar lm con tidyverse, lo cual permite hacer cosas como calcular los intervalos de confianza. 
+ 
+ Broom tiene tres funciones principales, las cuales extraen información de los objetos que retorna lm y los adapta a un dataframe amigable para tidyverse. 
+ 
+ Estas funciones son dity, glance y augment. 
+ 
+ La función tidy retorna estimados e información relacionada en un dataframe amigable. 
+```{r}
+library(broom)
+fit <- lm (R~BB, dat)
+tidy(fit)
+```
+ 
+ Se le pueden agregar otros argumentos, para que ofrezca información más útil. Por ejemplo, conf.int = TRUE arroja los intervalos de confianza. 
+```{r}
+tidy(fit, conf.int = TRUE)
+```
+ Debido a que los resultados son dataframes, podemos usarlos inmediatamente con la función summarise para producir las tablas que queremos: 
+ 
+```{r}
+dat %>%
+  group_by(HR)%>%
+  summarize(tidy(lm(R~BB), conf.int = TRUE))
+```
+ Debido a que podemos filtrar y seleccionar, podemos hacerlo más bello adicionando un poco de código: 
+ 
+```{r}
+dat %>%
+  group_by(HR) %>%
+  summarise(tidy(lm(R~BB), conf.int = TRUE))%>%
+  filter(term=="BB" & !is.na(estimate))%>%
+  select(HR, estimate, conf.low, conf.high)
+```
+ 
+con esta tabla ya podríamos usar un ggplot: 
+```{r}
+dat %>%
+  group_by(HR) %>%
+  summarise(tidy(lm(R~BB), conf.int = TRUE))%>%
+  filter(term=="BB" & !is.na(estimate))%>%
+  select(HR, estimate, conf.low, conf.high)%>%
+  ggplot(aes(HR, y = estimate, ymin = conf.low, ymax = conf.high))+
+  geom_errorbar()+
+  geom_point()
+```
+Debido a que los intervalos de confianza se solapan, tenemos evidencia de que las pendientes son las mismas. 
+
